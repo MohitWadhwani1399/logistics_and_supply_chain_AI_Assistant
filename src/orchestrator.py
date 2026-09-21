@@ -1,0 +1,62 @@
+import os
+import sys
+from pathlib import Path
+from dotenv import load_dotenv
+from typing import Annotated, TypedDict
+
+from langchain_core.messages import BaseMessage, SystemMessage
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.checkpoint.memory import MemorySaver
+
+# ==========================================
+# 1. SETUP & PATH RESOLUTION
+# ==========================================
+script_dir = Path(__file__).resolve().parent
+project_root = script_dir.parents[0]
+
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from src.agent_tools import query_telemetry_db, fetch_corridor_conditions, search_compliance_sop
+
+load_dotenv(project_root / ".env")
+
+class AgentState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+
+# ==========================================
+# 2. FACTORY INITIALIZATION: AGENT REASONER LLM
+# ==========================================
+AGENT_LLM_SETTING = os.getenv("Agent_llm", "OLLAMA").strip().upper()
+
+if AGENT_LLM_SETTING == "OPENAI":
+    print("🤖 Brain Mode: Utilizing Cloud OpenAI Reasoner (gpt-4o)...")
+    from langchain_openai import ChatOpenAI
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+
+elif AGENT_LLM_SETTING == "DEEPSEEK":
+    print("🐳 Brain Mode: Utilizing Flagship DeepSeek Cloud Reasoner (deepseek-v4-pro)...")
+    from langchain_openai import ChatOpenAI
+    
+    # Fully updated to match 2026 DeepSeek API parameters and endpoint contracts
+    llm = ChatOpenAI(
+        model="deepseek-v4-flash",                           # deepseek-v4-flash, deepseek-v4-pro
+        temperature=0,
+        openai_api_key=os.getenv("DEEPSEEK_API_KEY"),
+        base_url="https://api.deepseek.com",     # Fixed connection string url endpoint
+        max_tokens=2048,                                   # Gives the deep reasoner plenty of output runway
+        # extra_body={
+        #     "thinking": {"type": "enabled"},              # Activates DeepSeek Deep-Thinking mode
+        #     "reasoning_effort": "high"                     # Drives maximal reasoning depth for logic maps
+        # }
+    )
+
+else:  # FALLBACK / DEFAULT RUNNER MODE
+    print("🤗 Brain Mode: Local Fallback Activated. Binding Local Ollama (qwen2.5:7b)...")
+    from langchain_community.chat_models import ChatOllama
+    llm = ChatOllama(model="qwen2.5:7b", temperature=0, num_predict=1024)
+
+fde_tools = [query_telemetry_db, fetch_corridor_conditions, search_compliance_sop]
+llm_with_tools = llm.bind_tools(fde_tools)
