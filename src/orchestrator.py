@@ -60,3 +60,19 @@ else:  # FALLBACK / DEFAULT RUNNER MODE
 
 fde_tools = [query_telemetry_db, fetch_corridor_conditions, search_compliance_sop]
 llm_with_tools = llm.bind_tools(fde_tools)
+
+def reasoning_node(state: AgentState) -> AgentState:
+    messages = state["messages"]
+    response = llm_with_tools.invoke(messages)
+    return {"messages": [response]}
+
+print("⚙️ Compiling LangGraph FDE Orchestrator...")
+graph_builder = StateGraph(AgentState)
+graph_builder.add_node("reasoner", reasoning_node)
+graph_builder.add_node("tools", ToolNode(fde_tools))
+
+graph_builder.add_edge(START, "reasoner")
+graph_builder.add_conditional_edges("reasoner", "tools", condition=tools_condition)
+graph_builder.add_edge("tools", "reasoner")
+
+fde_orchestrator = graph_builder.compile(checkpointer=MemorySaver("fde_orchestrator_memory.json", max_memory_size=1000))
