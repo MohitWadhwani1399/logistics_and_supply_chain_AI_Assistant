@@ -104,3 +104,116 @@ with st.sidebar:
         st.session_state.ui_messages = []
         st.session_state.thread_id = str(uuid.uuid4())
         st.rerun()
+
+# ==========================================
+# 6. VIEW ROUTING (DISPATCH VS AUDIT)
+# ==========================================
+
+if app_mode == "🧊 Dispatch Console":
+    # ------------------------------------------
+    # TAB 1: CHAT UI & AGENT EXECUTION
+    # ------------------------------------------
+    st.title("Cold-Chain Incident Control Dashboard")
+    st.caption("Production Data Engineering Pipeline • Real-Time Decision Optimization Platform")
+
+    for entry in st.session_state.ui_messages:
+        with st.chat_message(entry["role"], avatar="👤" if entry["role"] == "user" else "🤖"):
+            if "traces" in entry:
+                for trace in entry["traces"]:
+                    if trace["type"] == "tool_input":
+                        st.markdown(f"**⚡ Intent Recognized:** `{trace['name']}`")
+                        with st.expander(f"📥 View Generated Input ({trace['name']})", expanded=False):
+                            st.json(trace["args"])
+                    elif trace["type"] == "tool_output":
+                        with st.expander(f"📤 View Raw Output ({trace['name']})", expanded=False):
+                            st.code(trace["content"], language="text")
+            st.markdown(entry["content"])
+
+    if user_input := st.chat_input("Query fleet telemetry, corridor updates, or compliance thresholds..."):
+        
+        st.session_state.ui_messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user", avatar="👤"):
+            st.markdown(user_input)
+
+        with st.chat_message("assistant", avatar="🤖"):
+            final_response = ""
+            current_traces = [] 
+            
+            with st.status("🧠 Initializing Core Reasoner Node...", expanded=True) as status:
+                events = fde_agent.stream(
+                    {"messages": [HumanMessage(content=user_input)]}, 
+                    config=thread_config,
+                    stream_mode="updates"
+                )
+                
+                for event in events:
+                    for node_name, node_state in event.items():
+                        
+                        if node_name == "reasoner":
+                            latest_msg = node_state["messages"][-1]
+                            
+                            # A. Intercept Tool Call Requests (Inputs)
+                            if hasattr(latest_msg, "tool_calls") and latest_msg.tool_calls:
+                                status.update(label="🧠 Agent generated tool parameters...")
+                                for tool_call in latest_msg.tool_calls:
+                                    st.markdown(f"**⚡ Intent Recognized:** `{tool_call['name']}`")
+                                    with st.expander(f"📥 View Generated Input ({tool_call['name']})", expanded=False):
+                                        st.json(tool_call['args'])
+                                    
+                                    current_traces.append({
+                                        "type": "tool_input",
+                                        "name": tool_call['name'],
+                                        "args": tool_call['args']
+                                    })
+                                    
+                                    write_audit_log(
+                                        session_id=st.session_state.thread_id,
+                                        node_name="reasoner",
+                                        tool_name=tool_call['name'],
+                                        content=json.dumps(tool_call['args'])
+                                    )
+                            
+                            # B. Intercept Final Generation
+                            if latest_msg.content:
+                                final_response = latest_msg.content
+                                status.update(label="📝 Generating Operational Resolution Report...")
+                                
+                                write_audit_log(
+                                    session_id=st.session_state.thread_id,
+                                    node_name="reasoner_final",
+                                    tool_name="LLM Text Synthesis",
+                                    content=final_response
+                                )
+                                
+                        elif node_name == "tools":
+                            status.update(label="🔧 Executing Enterprise Subsystem Tools...")
+                            for msg in node_state.get("messages", []):
+                                if isinstance(msg, ToolMessage):
+                                    with st.expander(f"📤 View Raw Output ({msg.name})", expanded=False):
+                                        st.code(msg.content, language="text")
+                                        
+                                    current_traces.append({
+                                        "type": "tool_output",
+                                        "name": msg.name,
+                                        "content": msg.content
+                                    })
+                                    
+                                    write_audit_log(
+                                        session_id=st.session_state.thread_id,
+                                        node_name="tools",
+                                        tool_name=msg.name,
+                                        content=msg.content
+                                    )
+                
+                status.update(label="Incident Matrix Evaluation Complete", state="complete", expanded=False)
+                
+            if final_response:
+                st.markdown(final_response)
+                st.session_state.ui_messages.append({
+                    "role": "assistant",
+                    "content": final_response,
+                    "traces": current_traces
+                })
+            else:
+                error_fallback = "⚠️ Execution Timeout: System engine encountered an unresolved processing edge case."
+                st.error(error_fallback)
