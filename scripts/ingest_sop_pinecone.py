@@ -44,7 +44,7 @@ if HASH_CACHE_FILE.exists():
 # ==========================================
 # 2. DYNAMIC ENVIRONMENT ROUTING
 # ==========================================
-EMBEDDINGS_MODEL_SETTING = os.getenv("Embeddings_model", "LOCAL").strip().upper()
+EMBEDDINGS_MODEL_SETTING = os.getenv("EMBEDDING_MODEL", "LOCAL").strip().upper()
 
 if EMBEDDINGS_MODEL_SETTING == "OPENAI":
     print("🤖 Mode: Utilizing Cloud OpenAI Embeddings (1536 Dim)...")
@@ -125,26 +125,6 @@ def parse_and_chunk_document(doc_path: Path) -> list[Document]:
             print(f"  ❌ Error parsing PDF {doc_path.name}: {e}")
             return []
         
-    elif ext in [".csv", ".xlsx"]:
-        try:
-            df = pd.read_csv(doc_path) if ext == ".csv" else pd.read_excel(doc_path)
-        except Exception as e:
-            print(f"  ❌ Error reading table: {e}")
-            return []
-            
-        for idx, row in df.iterrows():
-            row_dict = row.to_dict()
-            row_items = [
-                f"{str(col)}: {str(val)}" 
-                for col, val in row_dict.items() 
-                if pd.notna(val) and str(val).strip() != ""
-            ]
-            
-            if row_items:
-                row_text = " | ".join(row_items)
-                doc_item = Document(page_content=row_text, metadata={"row_index": int(idx)})
-                raw_chunks.append(doc_item)
-
     # sanity check
     valid_chunks = []
     for chunk in raw_chunks:
@@ -159,7 +139,7 @@ def parse_and_chunk_document(doc_path: Path) -> list[Document]:
 # 5. INCREMENTAL PIPELINE WITH BATCHING
 # ==========================================
 policy_dir = project_root / "data" / "policy"
-target_patterns = ["*.md", "*.txt", "*.pdf", "*.csv", "*.xlsx"]
+target_patterns = ["*.md", "*.txt", "*.pdf"]
 current_files = {}
 for pattern in target_patterns:
     for file_path in policy_dir.glob(pattern):
