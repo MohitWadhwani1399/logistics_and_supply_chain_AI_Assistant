@@ -109,7 +109,7 @@ if __name__ == "__main__":
         for event in events:
             for node_name, node_state in event.items():
                 if node_name == "tools":
-                    print("   [System] 🔄 Retrieving external data elements via ToolNode...")
+                    print("[System] 🔄 Retrieving external data elements via ToolNode...")
                 elif node_name == "reasoner":
                     latest_msg = node_state["messages"][-1]
                     if latest_msg.content:

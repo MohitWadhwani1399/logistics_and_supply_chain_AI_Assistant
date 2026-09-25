@@ -1,11 +1,14 @@
 import os
 import sys
 import uuid
+import json
 import urllib
 from pathlib import Path
 from dotenv import load_dotenv
 import streamlit as st
+import pandas as pd
 from sqlalchemy import create_engine, text
+from langchain_core.messages import HumanMessage, ToolMessage
 
 # ==========================================
 # 1. IMMEDIATE PATH & ENVIRONMENT RESOLUTION
@@ -17,6 +20,9 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 load_dotenv(project_root / ".env")
+
+# Import the compiled graph and tools list dynamically
+from src.orchestrator import fde_orchestrator
 
 # ==========================================
 # 2. SQL CREDENTIALS MAPPING FROM .ENV
@@ -59,7 +65,7 @@ def write_audit_log(session_id, node_name, tool_name, content):
         print(f"Audit Log Failed (Silent): {e}")
 
 # ==========================================
-# 3. PAGE CONFIGURATION
+# 3. PAGE CONFIGURATION & ENTERPRISE THEME
 # ==========================================
 st.set_page_config(
     page_title="FDE Supply Chain Dispatch Console",
@@ -76,6 +82,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ==========================================
 # 4. MULTI-USER STATE & THREAD MANAGEMENT
 # ==========================================
 if "thread_id" not in st.session_state:
@@ -140,7 +147,7 @@ if app_mode == "🧊 Dispatch Console":
             current_traces = [] 
             
             with st.status("🧠 Initializing Core Reasoner Node...", expanded=True) as status:
-                events = fde_agent.stream(
+                events = fde_orchestrator.stream(
                     {"messages": [HumanMessage(content=user_input)]}, 
                     config=thread_config,
                     stream_mode="updates"
@@ -217,3 +224,74 @@ if app_mode == "🧊 Dispatch Console":
             else:
                 error_fallback = "⚠️ Execution Timeout: System engine encountered an unresolved processing edge case."
                 st.error(error_fallback)
+
+
+elif app_mode == "🛡️ Security & Audit Logs":
+    # ------------------------------------------
+    # TAB 2: AUDIT LOG VIEWER (REQUIRES ADMIN CREDENTIALS FROM .ENV OR INPUT)
+    # ------------------------------------------
+    st.title("🛡️ Enterprise Agent Audit Trail")
+    st.caption("Secure database inspection of FDE_VIEWS.AgentAuditLog")
+    
+    st.markdown("### Database Authorization Gate")
+    st.markdown("Enter high-privilege administrative credentials (defined in `.env` as `SQL_ADMIN_USER`) to query audit logs.")
+    
+    with st.form("admin_auth_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            input_user = st.text_input("Admin Username", value=os.getenv("SQL_ADMIN_USER", ""))
+        with col2:
+            input_pass = st.text_input("Admin Password", type="password", value="")
+            
+        submit_admin = st.form_submit_button("Authenticate & Load Logs", use_container_width=True)
+
+    if submit_admin:
+        expected_admin_user = os.getenv("SQL_ADMIN_USER")
+        expected_admin_pass = os.getenv("SQL_ADMIN_PASSWORD")
+        
+        if input_user == expected_admin_user and input_pass == expected_admin_pass:
+            try:
+                # Build an isolated admin connection string for viewing data
+                admin_params = urllib.parse.quote_plus(
+                    "DRIVER={ODBC Driver 18 for SQL Server};"
+                    f"SERVER={db_host},{db_port};"
+                    "DATABASE=master;"
+                    f"UID={input_user};"
+                    f"PWD={input_pass};"
+                    "Encrypt=no;"
+                    "TrustServerCertificate=yes;"
+                )
+                admin_engine = create_engine(f"mssql+pyodbc:///?odbc_connect={admin_params}")
+                
+                with admin_engine.connect() as conn:
+                    query = """
+                        SELECT LogID, Timestamp, SessionID, NodeExecuted, ToolName, Content 
+                        FROM FDE_VIEWS.AgentAuditLog 
+                        ORDER BY Timestamp DESC
+                    """
+                    df = pd.read_sql(query, conn)
+                
+                st.success("✅ Authenticated successfully as Admin.")
+                
+                if not df.empty:
+                    st.dataframe(
+                        df,
+                        column_config={
+                            "LogID": st.column_config.NumberColumn("ID", format="%d"),
+                            "Timestamp": st.column_config.DatetimeColumn("Execution Time", format="DD/MM/YYYY-h:mm a"),
+                            "SessionID": "Session Token",
+                            "NodeExecuted": "Graph Node",
+                            "ToolName": "Tool Triggered",
+                            "Content": "Raw Payload Data"
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        height=600
+                    )
+                else:
+                    st.info("No audit logs found in the database. Run a query in the Dispatch Console first.")
+                    
+            except Exception as e:
+                st.error(f"Database Query Failed: {e}")
+        else:
+            st.error("❌ Invalid Administrator Credentials.")
