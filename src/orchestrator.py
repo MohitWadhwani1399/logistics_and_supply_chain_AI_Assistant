@@ -29,7 +29,7 @@ class AgentState(TypedDict):
 # ==========================================
 # 2. FACTORY INITIALIZATION: AGENT REASONER LLM
 # ==========================================
-AGENT_LLM_SETTING = os.getenv("Agent_llm", "OLLAMA").strip().upper()
+AGENT_LLM_SETTING = os.getenv("Agent_LLM", "OLLAMA").strip().upper()
 
 if AGENT_LLM_SETTING == "OPENAI":
     print("🤖 Brain Mode: Utilizing Cloud OpenAI Reasoner (gpt-4o)...")
@@ -72,10 +72,10 @@ graph_builder.add_node("reasoner", reasoning_node)
 graph_builder.add_node("tools", ToolNode(fde_tools))
 
 graph_builder.add_edge(START, "reasoner")
-graph_builder.add_conditional_edges("reasoner", "tools", condition=tools_condition)
+graph_builder.add_conditional_edges("reasoner", tools_condition)
 graph_builder.add_edge("tools", "reasoner")
 
-fde_orchestrator = graph_builder.compile(checkpointer=MemorySaver("fde_orchestrator_memory.json", max_memory_size=1000))
+fde_orchestrator = graph_builder.compile(checkpointer=MemorySaver())
 
 # ==========================================
 # 4. CHAT LOOP TESTING PANEL

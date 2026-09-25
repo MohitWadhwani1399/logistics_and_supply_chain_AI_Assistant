@@ -38,7 +38,7 @@ def get_cached_huggingface_embeddings(model_name: str):
         )
     return _load_model(model_name)
 
-EMBEDDINGS_MODEL_SETTING = os.getenv("Embeddings_model", "LOCAL").strip().upper()
+EMBEDDINGS_MODEL_SETTING = os.getenv("EMBEDDING_MODEL", "LOCAL").strip().upper()
 
 db_host = os.getenv("SQL_SERVER_HOST", "localhost")
 db_port = os.getenv("SQL_SERVER_PORT", "1433")
